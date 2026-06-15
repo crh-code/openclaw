@@ -12,6 +12,11 @@ const hoisted = vi.hoisted(() => ({
   logoutWeb: vi.fn(async () => true),
 }));
 
+const workAuthState = {
+  accountId: "work",
+  authDir: "/tmp/openclaw-whatsapp-work",
+};
+
 vi.mock("./channel.runtime.js", () => ({
   logoutWeb: hoisted.logoutWeb,
 }));
@@ -19,22 +24,22 @@ vi.mock("./channel.runtime.js", () => ({
 describe("WhatsApp channel logout", () => {
   beforeEach(() => {
     hoisted.logoutWeb.mockClear();
-    clearWebAuthLoggedOut("work");
+    clearWebAuthLoggedOut(workAuthState);
   });
 
   afterEach(() => {
-    clearWebAuthLoggedOut("work");
+    clearWebAuthLoggedOut(workAuthState);
   });
 
   it("clears terminal logged-out state after explicit logout", async () => {
-    markWebAuthLoggedOut("work");
+    markWebAuthLoggedOut(workAuthState);
 
     const result = await whatsappPlugin.gateway?.logoutAccount?.({
       cfg: { channels: { whatsapp: {} } },
       accountId: "work",
       account: {
         accountId: "work",
-        authDir: "/tmp/openclaw-whatsapp-work",
+        authDir: workAuthState.authDir,
         enabled: true,
         isLegacyAuthDir: false,
         sendReadReceipts: false,
@@ -44,23 +49,23 @@ describe("WhatsApp channel logout", () => {
 
     expect(result).toEqual({ cleared: true, loggedOut: true });
     expect(hoisted.logoutWeb).toHaveBeenCalledWith({
-      authDir: "/tmp/openclaw-whatsapp-work",
+      authDir: workAuthState.authDir,
       isLegacyAuthDir: false,
       runtime: expect.anything(),
     });
-    expect(isWebAuthLoggedOut("work")).toBe(false);
+    expect(isWebAuthLoggedOut(workAuthState)).toBe(false);
   });
 
   it("keeps terminal logged-out state when logout leaves auth in place", async () => {
     hoisted.logoutWeb.mockResolvedValueOnce(false);
-    markWebAuthLoggedOut("work");
+    markWebAuthLoggedOut(workAuthState);
 
     const result = await whatsappPlugin.gateway?.logoutAccount?.({
       cfg: { channels: { whatsapp: {} } },
       accountId: "work",
       account: {
         accountId: "work",
-        authDir: "/tmp/openclaw-whatsapp-work",
+        authDir: workAuthState.authDir,
         enabled: true,
         isLegacyAuthDir: false,
         sendReadReceipts: false,
@@ -69,6 +74,6 @@ describe("WhatsApp channel logout", () => {
     });
 
     expect(result).toEqual({ cleared: false, loggedOut: false });
-    expect(isWebAuthLoggedOut("work")).toBe(true);
+    expect(isWebAuthLoggedOut(workAuthState)).toBe(true);
   });
 });

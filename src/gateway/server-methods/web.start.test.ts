@@ -72,7 +72,7 @@ describe("webHandlers web.login.start", () => {
     vi.clearAllMocks();
   });
 
-  it("restarts a previously running channel when login start exits early without a QR", async () => {
+  it("leaves a running channel alone when non-forced login start exits early without a QR", async () => {
     const loginWithQrStart = vi.fn().mockResolvedValue({
       code: "whatsapp-auth-unstable",
       message: "retry later",
@@ -97,8 +97,8 @@ describe("webHandlers web.login.start", () => {
       ),
     );
 
-    expect(stopChannel).toHaveBeenCalledWith("whatsapp", "default");
-    expect(startChannel).toHaveBeenCalledWith("whatsapp", "default");
+    expect(stopChannel).not.toHaveBeenCalled();
+    expect(startChannel).not.toHaveBeenCalled();
     expect(respond).toHaveBeenCalledWith(
       true,
       {
@@ -109,7 +109,7 @@ describe("webHandlers web.login.start", () => {
     );
   });
 
-  it("keeps the channel stopped when login start has taken over with a QR flow", async () => {
+  it("stops a running channel after non-forced login start takes over with a QR flow", async () => {
     const loginWithQrStart = vi.fn().mockResolvedValue({
       qrDataUrl: "data:image/png;base64,qr",
       message: "scan qr",
@@ -134,6 +134,33 @@ describe("webHandlers web.login.start", () => {
 
     expect(stopChannel).toHaveBeenCalledWith("whatsapp", "default");
     expect(startChannel).not.toHaveBeenCalled();
+  });
+
+  it("stops and restores a running channel around forced login failures without a QR", async () => {
+    const loginWithQrStart = vi.fn().mockResolvedValue({
+      code: "whatsapp-auth-unstable",
+      message: "retry later",
+    });
+    mocks.listChannelPlugins.mockReturnValue([
+      {
+        id: "whatsapp",
+        gatewayMethods: ["web.login.start"],
+        gateway: { loginWithQrStart },
+      },
+    ]);
+    const { context, startChannel, stopChannel } = createRunningWhatsappContext();
+
+    await webHandlers["web.login.start"](
+      createOptions(
+        { accountId: "default", force: true },
+        {
+          context,
+        },
+      ),
+    );
+
+    expect(stopChannel).toHaveBeenCalledWith("whatsapp", "default");
+    expect(startChannel).toHaveBeenCalledWith("whatsapp", "default");
   });
 
   it("preserves gateway method receiver state for login start", async () => {

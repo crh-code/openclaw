@@ -36,6 +36,8 @@ const WHATSAPP_LOGIN_AUTH_UNSTABLE_MESSAGE =
   "WhatsApp connected, but saving the linked credentials has not settled on disk yet. Retry login in a moment.";
 const WHATSAPP_LOGIN_AUTH_NOT_PERSISTED_MESSAGE =
   "WhatsApp connected, but the linked credentials were not found on disk. Retry login in a moment.";
+const WHATSAPP_LOGIN_AUTH_NOT_CLEARED_MESSAGE =
+  "existing auth could not be cleared. Remove or fix the configured WhatsApp auth directory, then retry login.";
 export const WHATSAPP_LOGGED_OUT_QR_MESSAGE =
   "WhatsApp reported the session is logged out. Cleared cached web session; please scan a new QR.";
 export const WHATSAPP_WATCHDOG_TIMEOUT_ERROR = "watchdog-timeout";
@@ -238,8 +240,12 @@ export async function waitForWhatsAppLoginResult(params: {
   let timeoutRestarted = false;
   let loggedOutRestarted = false;
 
-  const replaceLoginSocket = async (): Promise<WhatsAppLoginWaitResult | null> => {
-    closeWaSocket(currentSock);
+  const replaceLoginSocket = async (
+    opts: { closeCurrent?: boolean } = {},
+  ): Promise<WhatsAppLoginWaitResult | null> => {
+    if (opts.closeCurrent ?? true) {
+      closeWaSocket(currentSock);
+    }
     try {
       currentSock = await createSocket(false, params.verbose, {
         authDir: params.authDir,
@@ -311,13 +317,31 @@ export async function waitForWhatsAppLoginResult(params: {
             error: err,
           };
         }
-        await logoutWeb({
+        closeWaSocket(currentSock);
+        const cleared = await logoutWeb({
           authDir: params.authDir,
           isLegacyAuthDir: params.isLegacyAuthDir,
           runtime: params.runtime,
         });
+        if (!cleared) {
+          const existingAuth = await readWebAuthExistsForDecision(params.authDir);
+          if (existingAuth.outcome === "unstable") {
+            return {
+              outcome: "failed",
+              message: WHATSAPP_LOGIN_AUTH_UNSTABLE_MESSAGE,
+              error: new WhatsAppAuthUnstableError(WHATSAPP_LOGIN_AUTH_UNSTABLE_MESSAGE),
+            };
+          }
+          if (existingAuth.exists) {
+            return {
+              outcome: "failed",
+              message: WHATSAPP_LOGIN_AUTH_NOT_CLEARED_MESSAGE,
+              error: err,
+            };
+          }
+        }
         loggedOutRestarted = true;
-        const replacementFailure = await replaceLoginSocket();
+        const replacementFailure = await replaceLoginSocket({ closeCurrent: false });
         if (replacementFailure) {
           return replacementFailure;
         }

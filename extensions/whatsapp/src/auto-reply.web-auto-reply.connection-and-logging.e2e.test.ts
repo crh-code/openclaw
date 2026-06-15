@@ -482,7 +482,7 @@ describe("web auto-reply connection", () => {
         expect(sleep).not.toHaveBeenCalled();
         expect(getActiveWebListener(accountId)).toBeNull();
         await expect(fs.readFile(credsPath, "utf8")).resolves.toBe(credsJson);
-        expect(isWebAuthLoggedOut(accountId)).toBe(healthState === "logged-out");
+        expect(isWebAuthLoggedOut({ accountId, authDir })).toBe(healthState === "logged-out");
         expect(
           statuses.filter(
             (entry) => entry.connected === false && entry.healthState === healthState,
@@ -493,7 +493,7 @@ describe("web auto-reply connection", () => {
         expect(finalStatus?.connected).toBe(false);
         expect(finalStatus?.healthState).toBe(healthState);
       } finally {
-        clearWebAuthLoggedOut(accountId);
+        clearWebAuthLoggedOut({ accountId, authDir });
       }
     },
   );

@@ -288,6 +288,79 @@ describe("WhatsAppConnectionController", () => {
     expect(waitForConnection).toHaveBeenNthCalledWith(2, replacementSock, { timeout: "none" });
   });
 
+  it("does not retry logged-out login when stale auth cleanup is skipped", async () => {
+    logoutWebMock.mockResolvedValueOnce(false);
+    readWebAuthExistsForDecisionMock.mockResolvedValueOnce({
+      outcome: "stable",
+      exists: true,
+    });
+    const initialSock = createSocketWithTransportEmitter();
+    const replacementSock = createSocketWithTransportEmitter();
+    const loggedOutError = { output: { statusCode: DisconnectReason.loggedOut } };
+    const waitForConnection = vi.fn().mockRejectedValueOnce(loggedOutError);
+    const createSocket = vi.fn(async () => replacementSock);
+    const runtime = { log: vi.fn() } as never;
+
+    const result = await waitForWhatsAppLoginResult({
+      sock: initialSock as never,
+      authDir: "/tmp/wa-auth",
+      isLegacyAuthDir: false,
+      verbose: false,
+      runtime,
+      waitForConnection: waitForConnection as never,
+      createSocket: createSocket as never,
+    });
+
+    expect(result).toEqual({
+      outcome: "failed",
+      message:
+        "existing auth could not be cleared. Remove or fix the configured WhatsApp auth directory, then retry login.",
+      error: loggedOutError,
+    });
+    expect(logoutWebMock).toHaveBeenCalledWith({
+      authDir: "/tmp/wa-auth",
+      isLegacyAuthDir: false,
+      runtime,
+    });
+    expect(initialSock.end).toHaveBeenCalledOnce();
+    expect(createSocket).not.toHaveBeenCalled();
+    expect(waitForConnection).toHaveBeenCalledOnce();
+  });
+
+  it("retries logged-out login when cleanup is a no-op because no auth exists", async () => {
+    logoutWebMock.mockResolvedValueOnce(false);
+    readWebAuthExistsForDecisionMock
+      .mockResolvedValueOnce({ outcome: "stable", exists: false })
+      .mockResolvedValueOnce({ outcome: "stable", exists: true });
+    const initialSock = createSocketWithTransportEmitter();
+    const replacementSock = createSocketWithTransportEmitter();
+    const loggedOutError = { output: { statusCode: DisconnectReason.loggedOut } };
+    const waitForConnection = vi
+      .fn()
+      .mockRejectedValueOnce(loggedOutError)
+      .mockResolvedValueOnce(undefined);
+    const createSocket = vi.fn(async () => replacementSock);
+    const runtime = { log: vi.fn() } as never;
+
+    const result = await waitForWhatsAppLoginResult({
+      sock: initialSock as never,
+      authDir: "/tmp/wa-auth",
+      isLegacyAuthDir: false,
+      verbose: false,
+      runtime,
+      waitForConnection: waitForConnection as never,
+      createSocket: createSocket as never,
+    });
+
+    expect(result).toEqual({
+      outcome: "connected",
+      restarted: true,
+      sock: replacementSock,
+    });
+    expect(createSocket).toHaveBeenCalledOnce();
+    expect(waitForConnection).toHaveBeenNthCalledWith(2, replacementSock, { timeout: "none" });
+  });
+
   it("does not clear stale logged-out auth more than once", async () => {
     const initialSock = createSocketWithTransportEmitter();
     const replacementSock = createSocketWithTransportEmitter();

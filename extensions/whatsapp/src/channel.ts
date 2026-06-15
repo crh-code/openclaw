@@ -365,7 +365,10 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
             runtime,
           });
           if (cleared) {
-            clearWebAuthLoggedOut(account.accountId);
+            clearWebAuthLoggedOut({
+              accountId: account.accountId,
+              authDir: account.authDir,
+            });
           }
           return { cleared, loggedOut: cleared };
         },

@@ -227,7 +227,10 @@ function attachLoginWaiter(accountId: string, login: ActiveLogin) {
         return;
       }
       if (result.outcome === "connected") {
-        clearWebAuthLoggedOut(accountId);
+        clearWebAuthLoggedOut({
+          accountId,
+          authDir: login.authDir,
+        });
         current.sock = result.sock;
         current.connected = true;
         return;
@@ -333,7 +336,12 @@ export async function startWebLoginWithQr(
     };
   }
   const shouldRelinkLoggedOutAuth =
-    authState.exists && !opts.force && isWebAuthLoggedOut(account.accountId);
+    authState.exists &&
+    !opts.force &&
+    isWebAuthLoggedOut({
+      accountId: account.accountId,
+      authDir: account.authDir,
+    });
   const shouldClearExistingAuth = authState.exists && (opts.force || shouldRelinkLoggedOutAuth);
   if (
     authState.exists &&
@@ -360,14 +368,20 @@ export async function startWebLoginWithQr(
             "WhatsApp login failed: existing auth could not be cleared. Remove or fix the configured WhatsApp auth directory, then retry login.",
         };
       }
-      clearWebAuthLoggedOut(account.accountId);
+      clearWebAuthLoggedOut({
+        accountId: account.accountId,
+        authDir: account.authDir,
+      });
     } catch (err) {
       return {
         message: `WhatsApp login failed: ${formatError(err)}`,
       };
     }
   } else if (opts.force) {
-    clearWebAuthLoggedOut(account.accountId);
+    clearWebAuthLoggedOut({
+      accountId: account.accountId,
+      authDir: account.authDir,
+    });
   }
 
   const existing = activeLogins.get(account.accountId);

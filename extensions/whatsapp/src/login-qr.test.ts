@@ -1,5 +1,7 @@
 // Whatsapp tests cover login qr plugin behavior.
+import path from "node:path";
 import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
+import { resolveOAuthDir } from "openclaw/plugin-sdk/state-paths";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getActiveWebListener } from "./active-listener.js";
 import { startWebLoginWithQr, waitForWebLogin } from "./login-qr.js";
@@ -64,6 +66,10 @@ const waitForWaConnectionMock = vi.mocked(waitForWaConnection);
 const logoutWebMock = vi.mocked(logoutWeb);
 const renderQrPngDataUrlMock = vi.mocked(renderQrPngDataUrl);
 
+function defaultAuthDirForAccount(accountId: string): string {
+  return path.join(resolveOAuthDir(), "whatsapp", accountId);
+}
+
 async function flushTasks() {
   await Promise.resolve();
   await Promise.resolve();
@@ -113,9 +119,18 @@ describe("login-qr", () => {
     getActiveWebListenerMock.mockReset().mockReturnValue(null);
     readWebSelfIdMock.mockReset().mockReturnValue({ e164: null, jid: null, lid: null });
     logoutWebMock.mockReset().mockResolvedValue(true);
-    clearWebAuthLoggedOut(rotatingAccountId);
-    clearWebAuthLoggedOut(concurrentAccountId);
-    clearWebAuthLoggedOut(terminalLoggedOutAccountId);
+    clearWebAuthLoggedOut({
+      accountId: rotatingAccountId,
+      authDir: defaultAuthDirForAccount(rotatingAccountId),
+    });
+    clearWebAuthLoggedOut({
+      accountId: concurrentAccountId,
+      authDir: defaultAuthDirForAccount(concurrentAccountId),
+    });
+    clearWebAuthLoggedOut({
+      accountId: terminalLoggedOutAccountId,
+      authDir: defaultAuthDirForAccount(terminalLoggedOutAccountId),
+    });
     renderQrPngDataUrlMock
       .mockReset()
       .mockImplementation(async (input) => `data:image/png;base64,encoded:${input}`);
@@ -236,7 +251,11 @@ describe("login-qr", () => {
   });
 
   it("uses terminal logged-out state to relink existing auth without force", async () => {
-    markWebAuthLoggedOut(terminalLoggedOutAccountId);
+    const authDir = defaultAuthDirForAccount(terminalLoggedOutAccountId);
+    markWebAuthLoggedOut({
+      accountId: terminalLoggedOutAccountId,
+      authDir,
+    });
     waitForWaConnectionMock.mockImplementation(() => new Promise(() => {}));
     readWebAuthExistsForDecisionMock.mockResolvedValueOnce({
       outcome: "stable",
@@ -257,7 +276,46 @@ describe("login-qr", () => {
       isLegacyAuthDir: false,
       runtime: expect.anything(),
     });
-    expect(isWebAuthLoggedOut(terminalLoggedOutAccountId)).toBe(false);
+    expect(
+      isWebAuthLoggedOut({
+        accountId: terminalLoggedOutAccountId,
+        authDir,
+      }),
+    ).toBe(false);
+  });
+
+  it("ignores stale terminal logged-out state from a previous auth directory", async () => {
+    const accountId = "reconfigured-auth-dir";
+    markWebAuthLoggedOut({
+      accountId,
+      authDir: "/tmp/openclaw-old-whatsapp-auth-dir",
+    });
+    try {
+      waitForWaConnectionMock.mockImplementation(() => new Promise(() => {}));
+      readWebAuthExistsForDecisionMock.mockResolvedValueOnce({
+        outcome: "stable",
+        exists: true,
+      });
+
+      const result = await startWebLoginWithQr({ timeoutMs: 5000, accountId });
+
+      expect(result).toEqual({
+        qrDataUrl: "data:image/png;base64,encoded:qr-data",
+        message: "Scan this QR in WhatsApp → Linked Devices.",
+      });
+      expect(logoutWebMock).not.toHaveBeenCalled();
+      expect(
+        isWebAuthLoggedOut({
+          accountId,
+          authDir: "/tmp/openclaw-old-whatsapp-auth-dir",
+        }),
+      ).toBe(true);
+    } finally {
+      clearWebAuthLoggedOut({
+        accountId,
+        authDir: "/tmp/openclaw-old-whatsapp-auth-dir",
+      });
+    }
   });
 
   it("rederives logged-out auth after restart when preserved creds have no active listener", async () => {
@@ -335,7 +393,8 @@ describe("login-qr", () => {
 
   it("does not start a fresh QR when existing auth cleanup is skipped", async () => {
     const accountId = "skipped-cleanup-qr";
-    markWebAuthLoggedOut(accountId);
+    const authDir = defaultAuthDirForAccount(accountId);
+    markWebAuthLoggedOut({ accountId, authDir });
     try {
       logoutWebMock.mockResolvedValueOnce(false);
       readWebAuthExistsForDecisionMock.mockResolvedValueOnce({
@@ -349,16 +408,43 @@ describe("login-qr", () => {
         message:
           "WhatsApp login failed: existing auth could not be cleared. Remove or fix the configured WhatsApp auth directory, then retry login.",
       });
-      expect(isWebAuthLoggedOut(accountId)).toBe(true);
+      expect(isWebAuthLoggedOut({ accountId, authDir })).toBe(true);
       expect(createWaSocketMock).not.toHaveBeenCalled();
     } finally {
-      clearWebAuthLoggedOut(accountId);
+      clearWebAuthLoggedOut({ accountId, authDir });
     }
+  });
+
+  it("reports skipped cleanup during QR login as an auth cleanup failure", async () => {
+    const accountId = "skipped-cleanup-after-qr";
+    waitForWaConnectionMock.mockRejectedValueOnce({
+      output: { statusCode: 401 },
+    });
+    readWebAuthExistsForDecisionMock
+      .mockResolvedValueOnce({ outcome: "stable", exists: false })
+      .mockResolvedValueOnce({ outcome: "stable", exists: true });
+    logoutWebMock.mockResolvedValueOnce(false);
+
+    const start = await startWebLoginWithQr({ timeoutMs: 5000, accountId });
+    expect(start.qrDataUrl).toBe("data:image/png;base64,encoded:qr-data");
+
+    await expect(
+      waitForWebLogin({
+        timeoutMs: 5000,
+        currentQrDataUrl: start.qrDataUrl,
+        accountId,
+      }),
+    ).resolves.toEqual({
+      connected: false,
+      message:
+        "WhatsApp login failed: existing auth could not be cleared. Remove or fix the configured WhatsApp auth directory, then retry login.",
+    });
   });
 
   it("clears terminal logged-out state after successful QR relink", async () => {
     const accountId = "qr-success-clears-terminal-state";
-    markWebAuthLoggedOut(accountId);
+    const authDir = defaultAuthDirForAccount(accountId);
+    markWebAuthLoggedOut({ accountId, authDir });
     let finishLogin!: () => void;
     waitForWaConnectionMock.mockImplementationOnce(
       () =>
@@ -387,7 +473,7 @@ describe("login-qr", () => {
       message: "✅ Linked! WhatsApp is ready.",
     });
 
-    expect(isWebAuthLoggedOut(accountId)).toBe(false);
+    expect(isWebAuthLoggedOut({ accountId, authDir })).toBe(false);
     logoutWebMock.mockClear();
     getActiveWebListenerMock.mockReturnValue({} as never);
     await expect(startWebLoginWithQr({ timeoutMs: 5000, accountId })).resolves.toEqual({

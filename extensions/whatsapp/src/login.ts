@@ -53,7 +53,10 @@ export async function loginWeb(
       },
     });
     if (result.outcome === "connected") {
-      clearWebAuthLoggedOut(account.accountId);
+      clearWebAuthLoggedOut({
+        accountId: account.accountId,
+        authDir: account.authDir,
+      });
       runtime.log(
         success(
           result.restarted
