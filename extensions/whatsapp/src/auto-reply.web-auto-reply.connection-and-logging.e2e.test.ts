@@ -32,7 +32,11 @@ import {
 } from "./inbound/test-message.test-helper.js";
 import type { WebInboundMessageInput } from "./inbound/types.js";
 import { waitForWaConnection } from "./session.js";
-import { clearWebAuthLoggedOut, isWebAuthLoggedOut } from "./web-auth-terminal-state.js";
+import {
+  clearWebAuthLoggedOut,
+  isWebAuthLoggedOut,
+  markWebAuthLoggedOut,
+} from "./web-auth-terminal-state.js";
 
 type DrainSelectionEntry = {
   channel: string;
@@ -497,6 +501,52 @@ describe("web auto-reply connection", () => {
       }
     },
   );
+
+  it("clears terminal logged-out state after a healthy monitor connection", async () => {
+    const accountId = "terminal-recovered";
+    const authDir = path.join(resolveOAuthDir(), "whatsapp", accountId);
+    markWebAuthLoggedOut({ accountId, authDir });
+    setLoadConfigMock({
+      channels: {
+        whatsapp: {
+          allowFrom: ["*"],
+          accounts: {
+            [accountId]: {
+              authDir,
+            },
+          },
+        },
+      },
+      messages: {
+        messagePrefix: undefined,
+        responsePrefix: undefined,
+      },
+    });
+
+    const scripted = createScriptedWebListenerFactory();
+    const { controller, run } = startWebAutoReplyMonitor({
+      monitorWebChannelFn: monitorWebChannel as never,
+      listenerFactory: scripted.listenerFactory,
+      accountId,
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(scripted.getListenerCount()).toBe(1);
+        },
+        { timeout: 250, interval: 2 },
+      );
+
+      expect(isWebAuthLoggedOut({ accountId, authDir })).toBe(false);
+    } finally {
+      controller.abort();
+      scripted.resolveClose(0, { status: 499, isLoggedOut: false });
+      await run;
+      clearWebAuthLoggedOut({ accountId, authDir });
+      resetLoadConfigMock();
+    }
+  });
 
   it("retries inbox attach when auth state is still stabilizing", async () => {
     const sleep = vi.fn(async () => {});
